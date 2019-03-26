@@ -16,8 +16,8 @@ class Bird(object):
         # set classifier and partitioner to defaults; these can be changed before starting classification
         self.clf = LinearCSVMC()
         # self.clf = GNB()
-        # TODO set correct nfoldpartitioner split for stable decoding estimates
-        self.splt = NFoldPartitioner(cvtype=1, attr='chunks')
+        # split data 80/20 (training/test) for stable decoding estimates cf. https://doi.org/10.1016/j.neuroimage.2016.10.038
+        self.splt = NFoldPartitioner(cvtype=.2, attr='chunks', selection_strategy='random', count=10)
         self.sl_radius = 3
         self.ds = False
         self.hdr = False
@@ -51,9 +51,6 @@ class Bird(object):
         if not self.ds:
             logging.error('No dataset loaded')
 
-        # initialize randomizer with seed
-        randomizer = np.random.RandomState(seed)
-
         # set up write path
         write_dir = os.path.join(self.working_dir, self.subject)
         if not os.path.isdir(write_dir):
@@ -64,12 +61,12 @@ class Bird(object):
         for i in range(n_permutations):
 
             # set up permutator with seed
-            permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1, rng=randomizer)
+            permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1, rng=i * seed)
 
             # specify crossvalidation scheme including label permutation
             cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
                                  postproc=mean_sample(), errorfx=mean_match_accuracy)
-            
+
             self.permuted_acc_maps += [self.run_searchlight(cv)]
             self.permuted_acc_maps[i].to_filename(os.path.join(write_dir, f'permuted_acc_map_{i}.nii'))
 
