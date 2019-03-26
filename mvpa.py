@@ -38,6 +38,7 @@ class Bird(object):
         # specify crossvalidation scheme
         cv = CrossValidation(self.clf, self.splt, postproc=mean_sample(), errorfx=mean_match_accuracy)
 
+        # set up write path
         write_dir = os.path.join(self.working_dir, self.subject)
         if not os.path.isdir(write_dir):
             os.mkdir(write_dir)
@@ -50,21 +51,25 @@ class Bird(object):
         if not self.ds:
             logging.error('No dataset loaded')
 
-        # set up permutator with seed
-        permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1,
-                                              rng=np.random.RandomState(seed))
+        # initialize randomizer with seed
+        randomizer = np.random.RandomState(seed)
 
-        # specify crossvalidation scheme including label permutation
-        cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
-                             postproc=mean_sample(), errorfx=mean_match_accuracy)
-
+        # set up write path
         write_dir = os.path.join(self.working_dir, self.subject)
         if not os.path.isdir(write_dir):
             os.mkdir(write_dir)
 
-        # run searchlight and write accuracy maps to file
+        # run permuted searchlight and write accuracy maps to file in loop
         self.permuted_acc_maps = []
         for i in range(n_permutations):
+
+            # set up permutator with seed
+            permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1, rng=randomizer)
+
+            # specify crossvalidation scheme including label permutation
+            cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
+                                 postproc=mean_sample(), errorfx=mean_match_accuracy)
+            
             self.permuted_acc_maps += [self.run_searchlight(cv)]
             self.permuted_acc_maps[i].to_filename(os.path.join(write_dir, f'permuted_acc_map_{i}.nii'))
 
