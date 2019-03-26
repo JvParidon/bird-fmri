@@ -1,0 +1,12 @@
+#!/bin/sh
+#$ -N spread_mvpa
+#$ -cwd
+#$ -t 4-22
+#$ -q fullnode.q
+#$ -S /bin/bash
+#$ -M Jeroen.vanParidon@mpi.nl
+#$ -m beas
+#$ -pe smp 1
+
+export PYENV_VERSION=2.7.15
+python mvpa.py --subject="S${SGE_TASK_ID}"

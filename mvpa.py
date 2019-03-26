@@ -14,8 +14,8 @@ class Bird(object):
 
     def __init__(self, working_dir):
         # set classifier and partitioner to defaults; these can be changed before starting classification
-        # self.clf = LinearCSVMC()
-        self.clf = GNB()
+        self.clf = LinearCSVMC()
+        # self.clf = GNB()
         # TODO set correct nfoldpartitioner split for stable decoding estimates
         self.splt = NFoldPartitioner(cvtype=1, attr='chunks')
         self.sl_radius = 3
@@ -38,9 +38,13 @@ class Bird(object):
         # specify crossvalidation scheme
         cv = CrossValidation(self.clf, self.splt, postproc=mean_sample(), errorfx=mean_match_accuracy)
 
+        write_dir = os.path.join(self.working_dir, self.subject)
+        if not os.path.isdir(write_dir):
+            os.mkdir(write_dir)
+
         # run searchlight and write accuracy map to file
         self.acc_map = self.run_searchlight(cv)
-        self.acc_map.to_filename(os.path.join(self.working_dir, self.subject, 'acc_map.nii'))
+        self.acc_map.to_filename(os.path.join(write_dir, 'acc_map.nii'))
 
     def permuted_classify(self, seed, n_permutations=100):
         if not self.ds:
@@ -54,12 +58,15 @@ class Bird(object):
         cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
                              postproc=mean_sample(), errorfx=mean_match_accuracy)
 
+        write_dir = os.path.join(self.working_dir, self.subject)
+        if not os.path.isdir(write_dir):
+            os.mkdir(write_dir)
+
         # run searchlight and write accuracy maps to file
         self.permuted_acc_maps = []
         for i in range(n_permutations):
             self.permuted_acc_maps += [self.run_searchlight(cv)]
-            self.permuted_acc_maps[i].to_filename(os.path.join(self.working_dir, self.subject,
-                                                               f'permuted_acc_map_{i}.nii'))
+            self.permuted_acc_maps[i].to_filename(os.path.join(write_dir, f'permuted_acc_map_{i}.nii'))
 
     def cluster_inference(self):
         if not self.acc_map:
@@ -127,7 +134,7 @@ class Bird(object):
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
         description='generate accuracy maps and permuted accuracy maps for a single subject')
-    argparser.add_argument('--subject', default='S11')
+    argparser.add_argument('--subject', default='S4')
     argparser.add_argument('--data_dir', default='/home/jerpar/Bird_MRI/converted/')
     argparser.add_argument('--working_dir', default='./')
     args = argparser.parse_args()
