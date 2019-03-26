@@ -14,7 +14,8 @@ class Bird(object):
 
     def __init__(self, working_dir):
         # set classifier and partitioner to defaults; these can be changed before starting classification
-        self.clf = LinearCSVMC()
+        # self.clf = LinearCSVMC()
+        self.clf = GNB()
         # TODO set correct nfoldpartitioner split for stable decoding estimates
         self.splt = NFoldPartitioner(cvtype=1, attr='chunks')
         self.sl_radius = 3
@@ -28,7 +29,7 @@ class Bird(object):
 
     def run_searchlight(self, cv):
         sl = sphere_searchlight(cv, radius=self.sl_radius, nproc=cpu_count)
-        return map2nifti(sl(self.ds), self.hdr)
+        return map2nifti(sl(self.ds), imghdr=self.hdr)
 
     def classify(self):
         if not self.ds:
@@ -77,17 +78,17 @@ class Bird(object):
             attr_saccades = SampleAttributes(os.path.join(data_dir, 'conditions', f'{subject}_Looking_Direction.txt'))
             dss = [fmri_dataset(os.path.join(path, f'glm_v4/spmT_{i:04}.nii'),
                                 targets=attr_saccades.targets[(i - 49)],
-                                mask=(path + subject + '_gray_white_CSF_mask.nii'),
+                                mask=(os.path.join(path, f'{subject}_gray_white_CSF_mask.nii')),
                                 chunks=attr_saccades.chunks[(i - 49)])
                    for i in range(49, 120)]
 
         elif condition == 'words':
-            attr_words = SampleAttributes('~/up_down_48/Word_Up_Down_48.txt')
-            dss = [fmri_dataset(os.path.join(path, f'glm_v4/spmT_{i:04}.nii'),
+            attr_words = SampleAttributes('/home/jerpar/up_down_48/Word_Up_Down_48.txt')
+            dss = [fmri_dataset(os.path.join(path, f'glm_v4/spmT_{i + 1:04}.nii'),
                                 targets=attr_words.targets[i],
-                                mask=(path + subject + '_gray_white_CSF_mask.nii'),
+                                mask=(os.path.join(path, f'{subject}_gray_white_CSF_mask.nii')),
                                 chunks=attr_words.chunks[i])
-                   for i in range(1, 49)]
+                   for i in range(48)]
 
         ds = vstack(dss)  # stack list of datasets into single multivolume dataset
         ds.samples = np.nan_to_num(ds.samples)  # reset NaNs to zero?
@@ -107,6 +108,7 @@ class Bird(object):
         ds.a.update(dss[0].a)  # get stacked dataset attributes from volume one in dataset list
         self.hdr = ds.a.imghdr  # store imghdr for later
         self.ds = ds
+        self.subject = subject
 
     def single_subject(self, data_dir, subject, seed):
         # TODO implement generating of all maps for single subject
@@ -126,9 +128,9 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
         description='generate accuracy maps and permuted accuracy maps for a single subject')
     argparser.add_argument('--subject', default='S11')
-    argparser.add_argument('--data_dir', default='~/Bird_MRI/converted/')
+    argparser.add_argument('--data_dir', default='/home/jerpar/Bird_MRI/converted/')
     argparser.add_argument('--working_dir', default='./')
     args = argparser.parse_args()
 
     project = Bird(args.working_dir)
-    Bird.single_subject(args.data_dir, args.subject, seed=7)
+    project.single_subject(args.data_dir, args.subject, seed=7)
