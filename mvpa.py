@@ -16,12 +16,12 @@ class Bird(object):
         # set classifier and partitioner to defaults; these can be changed before starting classification
         self.clf = LinearCSVMC()
         # self.clf = GNB()
-        # TODO set correct nfoldpartitioner split for stable decoding estimates
+        # TODO set correct partitioner split for stable decoding estimates
         self.splt = NFoldPartitioner(cvtype=1, attr='chunks')
         self.sl_radius = 3
-        self.ds = False
+        self.glm_maps = False
         self.hdr = False
-        self.acc_map = False
+        self.acc_maps = False
         self.permuted_acc_maps = False
         self.cluster_map = False
         self.working_dir = working_dir
@@ -29,60 +29,9 @@ class Bird(object):
 
     def run_searchlight(self, cv):
         sl = sphere_searchlight(cv, radius=self.sl_radius, nproc=cpu_count)
-        return map2nifti(sl(self.ds), imghdr=self.hdr)
+        return map2nifti(sl(self.glm_maps), imghdr=self.hdr)
 
-    def classify(self):
-        if not self.ds:
-            logging.error('No dataset loaded')
-
-        # specify crossvalidation scheme
-        cv = CrossValidation(self.clf, self.splt, postproc=mean_sample(), errorfx=mean_match_accuracy)
-
-        # set up write path
-        write_dir = os.path.join(self.working_dir, self.subject)
-        if not os.path.isdir(write_dir):
-            os.mkdir(write_dir)
-
-        # run searchlight and write accuracy map to file
-        self.acc_map = self.run_searchlight(cv)
-        self.acc_map.to_filename(os.path.join(write_dir, 'acc_map.nii'))
-
-    def permuted_classify(self, seed, n_permutations=100):
-        if not self.ds:
-            logging.error('No dataset loaded')
-
-        # initialize randomizer with seed
-        randomizer = np.random.RandomState(seed)
-
-        # set up write path
-        write_dir = os.path.join(self.working_dir, self.subject)
-        if not os.path.isdir(write_dir):
-            os.mkdir(write_dir)
-
-        # run permuted searchlight and write accuracy maps to file in loop
-        self.permuted_acc_maps = []
-        for i in range(n_permutations):
-
-            # set up permutator with seed
-            permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1, rng=randomizer)
-
-            # specify crossvalidation scheme including label permutation
-            cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
-                                 postproc=mean_sample(), errorfx=mean_match_accuracy)
-            
-            self.permuted_acc_maps += [self.run_searchlight(cv)]
-            self.permuted_acc_maps[i].to_filename(os.path.join(write_dir, f'permuted_acc_map_{i}.nii'))
-
-    def cluster_inference(self):
-        if not self.acc_map:
-            logging.error('No accuracy map loaded')
-        elif not self.permuted_acc_maps:
-            logging.error('No permuted labels accuracy map loaded')
-        # TODO implement group clustering procedure
-        # TODO write cluster map to nifti
-
-    def load_dataset(self, data_dir, subject):
-        # TODO load data
+    def load_glm_maps(self, data_dir, subject):
         path = os.path.join(data_dir, subject)
         condition = 'words'
 
@@ -111,6 +60,7 @@ class Bird(object):
         ds_h2 = ds[ds.sa.targets == 'down']
         ds_h1.sa.chunks = [i for i in range(1, len(ds_h1.sa.targets) + 1)]
         ds_h2.sa.chunks = [i for i in range(1, len(ds_h2.sa.targets) + 1)]
+
         # if saccades, reject extra volumes to balance dataset
         if condition == 'saccades':
             ds_h1 = ds_h1[ds_h1.sa.chunks < 31]
@@ -119,21 +69,101 @@ class Bird(object):
 
         ds.a.update(dss[0].a)  # get stacked dataset attributes from volume one in dataset list
         self.hdr = ds.a.imghdr  # store imghdr for later
-        self.ds = ds
+        self.glm_maps = ds
         self.subject = subject
 
+    def classify(self):
+        if not self.glm_maps:
+            logging.error('No dataset loaded')
+
+        # specify crossvalidation scheme
+        cv = CrossValidation(self.clf, self.splt, postproc=mean_sample(), errorfx=mean_match_accuracy)
+
+        # set up write path
+        write_dir = os.path.join(self.working_dir, self.subject)
+        if not os.path.isdir(write_dir):
+            os.mkdir(write_dir)
+
+        # run searchlight and write accuracy map to file
+        acc_map = self.run_searchlight(cv)
+        acc_map.sa.chunks = [self.subject]
+        acc_map.to_filename(os.path.join(write_dir, 'acc_map.nii'))
+        self.acc_maps += [acc_map]
+
+    def permuted_classify(self, seed, n_permutations=100):
+        if not self.glm_maps:
+            logging.error('No dataset loaded')
+
+        # set up write path
+        write_dir = os.path.join(self.working_dir, self.subject)
+        if not os.path.isdir(write_dir):
+            os.mkdir(write_dir)
+
+        # run permuted searchlight and write accuracy maps to file in loop
+        self.permuted_acc_maps = []
+        for i in range(n_permutations):
+
+            # set up permutator with seed
+            permutator = AttributePermutator('targets', limit={'partitions': 1}, count=1, rng=seed * i)
+
+            # specify crossvalidation scheme including label permutation
+            cv = CrossValidation(self.clf, ChainNode([self.splt, permutator], space=self.splt.get_space()),
+                                 postproc=mean_sample(), errorfx=mean_match_accuracy)
+
+            permuted_acc_map = self.run_searchlight(cv)
+            permuted_acc_map.sa.chunks = [self.subject]
+            permuted_acc_map.to_filename(os.path.join(write_dir, f'permuted_acc_map_{i}.nii'))
+            self.permuted_acc_maps += [permuted_acc_map]
+
+    def load_acc_maps(self, subjects):
+        for subject in subjects:
+            self.acc_maps += [fmri_dataset(os.path.join(self.working_dir, subject, 'acc_map.nii'), chunks=[subject])]
+            self.permuted_acc_maps += [fmri_dataset(os.path.join(self.working_dir, subject, f'permuted_acc_map_{i}.nii'), chunks=[subject]) for i in range(100)]
+
+    def cluster_inference(self, n_bootstrap=1e5):
+        if not self.acc_maps:
+            logging.error('No accuracy map loaded')
+        elif not self.permuted_acc_maps:
+            logging.error('No permuted labels accuracy map loaded')
+
+        self.acc_maps = vstack(self.acc_maps)
+        self.permuted_acc_maps = vstack(self.permuted_acc_maps)
+
+        feature_thresh_prob = .001
+        fwe_rate = .05
+        multicomp_correction = 'fdr_bh'
+        bootstrap = int(n_bootstrap)
+
+        # use n_blocks = 1000 to reduce memory load when using larger bootstrap sample?
+        cluster = GroupClusterThreshold(n_bootstrap=bootstrap,
+                                        feature_thresh_prob=feature_thresh_prob,
+                                        chunk_attr='chunks',
+                                        n_blocks=1000,
+                                        n_proc=1,
+                                        fwe_rate=fwe_rate,
+                                        multicomp_correction=multicomp_correction)
+
+        cluster.train(self.permuted_acc_maps)
+        cluster_map = cluster(self.acc_maps)
+        cluster_map.samples = cluster_map.fa.clusters_fwe_thresh
+        # write clusters to file
+        cluster_map = map2nifti(cluster_map, imghdr=self.hdr)
+        cluster_map.to_filename(os.path.join(self.working_dir, 'cluster_map.nii'))
+        self.cluster_map = cluster_map
+
     def single_subject(self, data_dir, subject, seed):
-        # TODO implement generating of all maps for single subject
-        self.load_dataset(data_dir, subject)
+        self.load_glm_maps(data_dir, subject)
         self.classify()
         self.permuted_classify(seed)
 
-    def permuted_inference(self, data_dir, subjects, seed):
-        # TODO implement full dataset processing
-        self.load_dataset(data_dir, subjects)
-        self.classify()
-        self.permuted_classify(seed)
-        self.cluster_inference()
+    def permuted_inference(self, subjects, n_bootstrap=1e5):
+        self.load_acc_maps(subjects)
+        self.cluster_inference(n_bootstrap)
+
+    def whole_bird(self, data_dir, subjects, seed):
+        for subject in subjects:
+            self.single_subject(data_dir, subject, seed)
+        self.permuted_inference()
 
 
 if __name__ == '__main__':
