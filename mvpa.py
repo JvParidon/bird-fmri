@@ -16,8 +16,8 @@ class Bird(object):
         # set classifier and partitioner to defaults; these can be changed before starting classification
         self.clf = LinearCSVMC()
         # self.clf = GNB()
-        # TODO set correct partitioner split for stable decoding estimates
-        self.splt = NFoldPartitioner(cvtype=1, attr='chunks')
+        # split data 80/20 (training/test) for stable decoding estimates cf. https://doi.org/10.1016/j.neuroimage.2016.10.038
+        self.splt = NFoldPartitioner(cvtype=.2, attr='chunks', selection_strategy='random', count=10)
         self.sl_radius = 3
         self.glm_maps = False
         self.hdr = False
